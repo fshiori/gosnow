@@ -5,12 +5,12 @@ github.com/twitter/snowflake in golang
 package gosnow
 
 import (
+	"fmt"
 	"hash/crc32"
 	"math/rand"
 	"net"
 	"sync"
 	"time"
-	"fmt"
 )
 
 const (
@@ -21,12 +21,21 @@ const (
 	WorkerIdBits = 10              // worker id
 	MaxWorkerId  = -1 ^ (-1 << 10) // worker id mask
 	SequenceBits = 12              // sequence
-	MaxSequence  = -1 ^ (-1 << 12) //sequence mask    
+	MaxSequence  = -1 ^ (-1 << 12) //sequence mask
 )
 
 var (
-	Since int64 = time.Date(2012, 1, 0, 0, 0, 0, 0, time.UTC).UnixNano() / nano
+	Since   int64 = time.Date(2012, 1, 0, 0, 0, 0, 0, time.UTC).UnixNano() / nano
+	Default *SnowFlake
 )
+
+func init() {
+	var err error
+	Default, err = NewSnowFlake(DefaultWorkId())
+	if err != nil {
+		panic(err)
+	}
+}
 
 type SnowFlake struct {
 	lastTimestamp uint64
@@ -41,29 +50,32 @@ func (sf *SnowFlake) uint64() uint64 {
 		(uint64(sf.sequence))
 }
 
-func (sf *SnowFlake) Next() (uint64, error) {
-	sf.lock.Lock()
-	defer sf.lock.Unlock()
-
+func (sf *SnowFlake) Next() uint64 {
 	ts := timestamp()
+	var delay uint64
+	sf.lock.Lock()
 	if ts == sf.lastTimestamp {
 		sf.sequence = (sf.sequence + 1) & MaxSequence
 		if sf.sequence == 0 {
-			ts = tilNextMillis(ts)
+			delay = 1
 		}
+	} else if ts < sf.lastTimestamp {
+		delay = (sf.lastTimestamp - ts)
+
 	} else {
 		sf.sequence = 0
 	}
 
-	if ts < sf.lastTimestamp {
-		return 0, fmt.Errorf("Invalid timestamp: %v - precedes %v", ts, sf)
-	}
+	id := sf.uint64()
 	sf.lastTimestamp = ts
-	return sf.uint64(),  nil
-}
 
-func Default() (*SnowFlake, error) {
-	return NewSnowFlake(DefaultWorkId())
+	sf.lock.Unlock()
+
+	if delay > 0 {
+		time.Sleep(time.Duration(delay) * time.Millisecond)
+		return sf.Next()
+	}
+	return id
 }
 
 func NewSnowFlake(workerId uint32) (*SnowFlake, error) {
@@ -75,14 +87,6 @@ func NewSnowFlake(workerId uint32) (*SnowFlake, error) {
 
 func timestamp() uint64 {
 	return uint64(time.Now().UnixNano()/nano - Since)
-}
-
-func tilNextMillis(ts uint64) uint64 {
-	i := timestamp()
-	for i < ts {
-		i = timestamp()
-	}
-	return i
 }
 
 func DefaultWorkId() uint32 {
