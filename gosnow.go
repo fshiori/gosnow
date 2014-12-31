@@ -44,8 +44,8 @@ type SnowFlake struct {
 	lock          sync.Mutex
 }
 
-func (sf *SnowFlake) uint64() uint64 {
-	return (sf.lastTimestamp << (WorkerIdBits + SequenceBits)) |
+func (sf *SnowFlake) uint64(ts uint64) uint64 {
+	return (ts << (WorkerIdBits + SequenceBits)) |
 		(uint64(sf.workerId) << SequenceBits) |
 		(uint64(sf.sequence))
 }
@@ -66,7 +66,7 @@ func (sf *SnowFlake) Next() uint64 {
 		sf.sequence = 0
 	}
 
-	id := sf.uint64()
+	id := sf.uint64(ts)
 	sf.lastTimestamp = ts
 
 	sf.lock.Unlock()
